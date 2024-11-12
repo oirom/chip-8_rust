@@ -1,3 +1,5 @@
+use std::path::MAIN_SEPARATOR;
+
 const FONTSET_SIZE: usize = 80;
 const FONTSET: [u8; FONTSET_SIZE] = [
     0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
@@ -93,5 +95,147 @@ impl Cpu {
     fn pop(&mut self) -> u16 {
         self.sp -= 1;
         self.stack[self.sp as usize]
+    }
+
+    pub fn tick(&mut self) {
+        // Fetch
+        let op = self.fetch();
+        // Decode & execute
+        self.execute(op);
+    }
+
+    fn fetch(&mut self) -> u16 {
+        let higer_byte = self.ram[self.pc as usize] as u16;
+        let lower_byte = self.ram[(self.pc + 1) as usize] as u16;
+        let op = (higer_byte << 8) | lower_byte;
+        self.pc += 2;
+        op
+    }
+
+    fn execute(&mut self, op: u16) {
+        let digit1 = (op & 0xF000) >> 12;
+        let digit2 = (op & 0x0F00) >> 8;
+        let digit3 = (op & 0x00F0) >> 4;
+        let digit4 = op & 0x000F;
+
+        match (digit1, digit2, digit3, digit4) {
+            // NOP
+            (0x0, 0x0, 0x0, 0x0) => return,
+            // CLS
+            (0x0, 0x0, 0xE, 0x0) => self.screen = [false; SCREEN_WIDTH * SCREEN_HIGHT],
+            // RET
+            (0x0, 0x0, 0xE, 0xE) => {
+                let ret_addr = self.pop();
+                self.pc = ret_addr;
+            }
+            // JMP NNN
+            (0x1, _, _, _) => {
+                let nnn = op & 0x0FFF;
+                self.pc = nnn;
+            }
+            // CALL NNN
+            (0x2, _, _, _) => {
+                let nnn = op & 0x0FFF;
+                self.push(self.pc);
+                self.pc = nnn;
+            }
+            // SKIP IF VX == NN
+            (0x3, _, _, _) => {
+                let x = digit2 as usize;
+                let nn = (op & 0xF00) as u8;
+                if self.v_reg[x] == nn {
+                    self.pc += 2;
+                }
+            }
+            // SKIP IF VX != NN
+            (0x4, _, _, _) => {
+                let x = digit2 as usize;
+                let nn = (op & 0xF00) as u8;
+                if self.v_reg[x] != nn {
+                    self.pc += 2;
+                }
+            }
+            // SKIP IF VX == VY
+            (0x5, _, _, 0x0) => {
+                let x = digit2 as usize;
+                let y = digit3 as usize;
+                if self.v_reg[x] == self.v_reg[y] {
+                    self.pc += 2;
+                }
+            }
+            // VX = NN
+            (0x6, _, _, _) => {
+                let x = digit2 as usize;
+                let nn = (op & 0xFF) as u8;
+                self.v_reg[x] = nn;
+            }
+            // VX += NN
+            (0x7, _, _, _) => {
+                let x = digit2 as usize;
+                let nn = (op & 0xFF) as u8;
+                self.v_reg[x] = self.v_reg[x].wrapping_add(nn);
+            }
+            // VX = VY
+            (0x8, _, _, 0x0) => {
+                let x = digit2 as usize;
+                let y = digit3 as usize;
+                self.v_reg[x] = self.v_reg[y];
+            }
+            // VX |= VY
+            (0x8, _, _, 0x1) => {
+                let x = digit2 as usize;
+                let y = digit3 as usize;
+                self.v_reg[x] |= self.v_reg[y];
+            }
+            // VX &= VY
+            (0x8, _, _, 0x2) => {
+                let x = digit2 as usize;
+                let y = digit3 as usize;
+                self.v_reg[x] &= self.v_reg[y];
+            }
+            // VX ^= VY
+            (0x8, _, _, 0x3) => {
+                let x = digit2 as usize;
+                let y = digit3 as usize;
+                self.v_reg[x] ^= self.v_reg[y];
+            }
+            // VX += VY
+            (0x8, _, _, 0x4) => {
+                let x = digit2 as usize;
+                let y = digit3 as usize;
+
+                let (new_vx, carry) = self.v_reg[x].overflowing_add(self.v_reg[y]);
+                let new_vf = if carry { 1 } else { 0 };
+
+                self.v_reg[x] = new_vx;
+                self.v_reg[0xF] = new_vf;
+            }
+            (0x8, _, _, 0x4) => self.add_vx_vy(op),
+            (0x8, _, _, 0x5) => self.sub_vx_vy(op),
+            (0x8, _, _, 0x6) => self.shr_vx_vy(op),
+            (0x8, _, _, 0x7) => self.subn_vx_vy(op),
+            (0x8, _, _, 0xE) => self.shl_vx_vy(op),
+            (0x9, _, _, 0x0) => self.sne_vx_vy(op),
+            (0xA, _, _, _) => self.ld_i_addr(op),
+            (0xB, _, _, _) => self.jp_v0_addr(op),
+            (0xC, _, _, _) => self.rnd_vx_byte(op),
+            (0xD, _, _, _) => self.drw_vx_vy_nibble(op),
+            (0xE, _, 0x9, 0xE) => self.skp_vx(op),
+            (0xE, _, 0xA, 0x1) => return,
+            (_, _, _, _) => unimplemented!("Unknown opcode: {:#06x}", op),
+        }
+    }
+
+    pub fn tick_timer(&mut self) {
+        if self.dt > 0 {
+            self.dt -= 1;
+        }
+
+        if self.st > 0 {
+            if self.st == 1 {
+                // BEEP
+            }
+            self.st -= 1;
+        }
     }
 }
