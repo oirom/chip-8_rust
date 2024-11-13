@@ -1,4 +1,3 @@
-use std::path::MAIN_SEPARATOR;
 use rand::random;
 
 const FONTSET_SIZE: usize = 80;
@@ -264,7 +263,7 @@ impl Cpu {
             (0xB, _, _, _) => {
                 let nnn = op & 0x0FFF;
                 self.pc = self.v_reg[0] as u16 + nnn;
-            },
+            }
             // VX = rand() & NN
             (0xC, _, _, _) => {
                 let x = digit2 as usize;
@@ -272,9 +271,32 @@ impl Cpu {
                 let rand_byte = random::<u8>();
                 self.v_reg[x] = rand_byte & nn;
             }
-            (0xD, _, _, _) => self.drw_vx_vy_nibble(op),
-            (0xE, _, 0x9, 0xE) => self.skp_vx(op),
-            (0xE, _, 0xA, 0x1) => return,
+            (0xD, _, _, _) => {
+                let x_coord = self.v_reg[digit2 as usize] as u16;
+                let y_coord = self.v_reg[digit3 as usize] as u16;
+                let num_rows = digit4;
+                let mut flipped = false;
+                for y_line in 0..num_rows {
+                    let addr = self.i_reg + y_line as u16;
+                    let pixels = self.ram[addr as usize];
+                    for x_line in 0..8 {
+                        if (pixels & (0x80 >> x_line)) != 0 {
+                            let x = (x_coord + x_line) as usize % SCREEN_WIDTH;
+                            let y = (y_coord + y_line) as usize % SCREEN_HIGHT;
+                            let idx = x + SCREEN_WIDTH * y;
+                            flipped |= self.screen[idx];
+                            self.screen[idx] ^= true;
+                        }
+                    }
+                }
+                if flipped {
+                    self.v_reg[0xF] = 1;
+                } else {
+                    self.v_reg[0xF] = 0;
+                }
+            }
+            // (0xE, _, 0x9, 0xE) => self.skp_vx(op),
+            // (0xE, _, 0xA, 0x1) => return,
             (_, _, _, _) => unimplemented!("Unknown opcode: {:#06x}", op),
         }
     }
