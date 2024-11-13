@@ -1,4 +1,5 @@
 use std::path::MAIN_SEPARATOR;
+use rand::random;
 
 const FONTSET_SIZE: usize = 80;
 const FONTSET: [u8; FONTSET_SIZE] = [
@@ -210,15 +211,67 @@ impl Cpu {
                 self.v_reg[x] = new_vx;
                 self.v_reg[0xF] = new_vf;
             }
-            (0x8, _, _, 0x4) => self.add_vx_vy(op),
-            (0x8, _, _, 0x5) => self.sub_vx_vy(op),
-            (0x8, _, _, 0x6) => self.shr_vx_vy(op),
-            (0x8, _, _, 0x7) => self.subn_vx_vy(op),
-            (0x8, _, _, 0xE) => self.shl_vx_vy(op),
-            (0x9, _, _, 0x0) => self.sne_vx_vy(op),
-            (0xA, _, _, _) => self.ld_i_addr(op),
-            (0xB, _, _, _) => self.jp_v0_addr(op),
-            (0xC, _, _, _) => self.rnd_vx_byte(op),
+            // VX -= VY
+            (0x8, _, _, 0x5) => {
+                let x = digit2 as usize;
+                let y = digit3 as usize;
+
+                let (new_vx, borrow) = self.v_reg[x].overflowing_sub(self.v_reg[y]);
+                let new_vf = if borrow { 0 } else { 1 };
+
+                self.v_reg[x] = new_vx;
+                self.v_reg[0xF] = new_vf;
+            }
+            // VX >>= 1
+            (0x8, _, _, 0x6) => {
+                let x = digit2 as usize;
+                let lsb = self.v_reg[x] & 0x1;
+                self.v_reg[x] >>= 1;
+                self.v_reg[0xF] = lsb;
+            }
+            // VX = VY - VX
+            (0x8, _, _, 0x7) => {
+                let x = digit2 as usize;
+                let y = digit3 as usize;
+
+                let (new_vx, borrow) = self.v_reg[y].overflowing_sub(self.v_reg[x]);
+                let new_vf = if borrow { 0 } else { 1 };
+
+                self.v_reg[x] = new_vx;
+                self.v_reg[0xF] = new_vf;
+            }
+            // VX <<= 1
+            (0x8, _, _, 0xE) => {
+                let x = digit2 as usize;
+                let msb = (self.v_reg[x] & 0x80) >> 7;
+                self.v_reg[x] <<= 1;
+                self.v_reg[0xF] = msb;
+            }
+            // SKIP IF VX != VY
+            (0x9, _, _, 0x0) => {
+                let x = digit2 as usize;
+                let y = digit3 as usize;
+                if self.v_reg[x] != self.v_reg[y] {
+                    self.pc += 2;
+                }
+            }
+            // I = NNN
+            (0xA, _, _, _) => {
+                let nnn = op & 0x0FFF;
+                self.i_reg = nnn;
+            }
+            // JUMP TO V0 + NNN
+            (0xB, _, _, _) => {
+                let nnn = op & 0x0FFF;
+                self.pc = self.v_reg[0] as u16 + nnn;
+            },
+            // VX = rand() & NN
+            (0xC, _, _, _) => {
+                let x = digit2 as usize;
+                let nn = (op & 0xFF) as u8;
+                let rand_byte = random::<u8>();
+                self.v_reg[x] = rand_byte & nn;
+            }
             (0xD, _, _, _) => self.drw_vx_vy_nibble(op),
             (0xE, _, 0x9, 0xE) => self.skp_vx(op),
             (0xE, _, 0xA, 0x1) => return,
